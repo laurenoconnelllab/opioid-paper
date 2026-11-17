@@ -1,0 +1,4 @@
+"region","N_mate_pairs","observed_r","null_mean","null_sd","z","p_label_permutation"
+"POA",9,0.5219,0.503,0.0099,1.91,0.0245
+"Pallium",8,0.7312,0.7281,0.0035,0.89,0.2033
+"Subpallium",9,0.6767,0.672,0.0048,0.99,0.18
