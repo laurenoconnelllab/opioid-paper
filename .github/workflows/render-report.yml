@@ -1,0 +1,139 @@
+# Rebuilds the reproducible report from the raw data on a clean GitHub machine
+# every time something is pushed to main, and publishes the result as the
+# website (GitHub Pages).
+#
+# What a green check mark means: starting from only Data/, Functions/, the
+# placed images in Figures/artwork/ and Reproducible-report.qmd, every script
+# ran without error, check_results.R confirmed the headline statistics, and
+# all 15 tables and 5 figures were made again.
+#
+# One-time setup on GitHub: Settings -> Pages -> Source: "GitHub Actions".
+
+name: Render report
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # adds a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - name: Get the repository
+        uses: actions/checkout@v4
+
+      - name: Install R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.3.3"
+          use-public-rspm: true
+
+      - name: Install the R packages
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readxl
+            any::ggplot2
+            any::patchwork
+            any::png
+            any::dplyr
+            any::tidyr
+            any::tibble
+            any::lme4
+            any::lmerTest
+            any::cowplot
+            any::scales
+            any::tidyverse
+            any::here
+            any::knitr
+            any::rmarkdown
+
+      - name: Install Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: "1.6.42"
+
+      # Start from the inputs alone: remove every table, figure and the report
+      # that were uploaded, so that everything below is made by this run.
+      - name: Remove the uploaded outputs
+        run: |
+          rm -rf Supplementary/derived_tables Figures/Figure4_panels Figures/Figure5_panels
+          rm -f Figures/*.png Figures/*.pdf Reproducible-report.html
+
+      - name: Render the report (runs every script from the raw data)
+        run: quarto render Reproducible-report.qmd
+
+      - name: Confirm that everything was rebuilt
+        run: |
+          grep -q "All checks passed" Reproducible-report.html
+          n_tables=$(ls Supplementary/derived_tables/*.csv | wc -l)
+          n_figures=$(ls Figures/Figure*.png | wc -l)
+          echo "tables rebuilt: $n_tables (expected 15); figures rebuilt: $n_figures (expected 5)"
+          test "$n_tables" -eq 15
+          test "$n_figures" -eq 5
+
+      # For information only (never fails the run): how many rebuilt tables are
+      # byte-for-byte the same as the copies in the repository. A different
+      # computer can change the 15th decimal place of a number.
+      - name: Compare the rebuilt tables with the uploaded copies
+        run: |
+          same=0; total=0
+          for f in Supplementary/derived_tables/*.csv; do
+            total=$((total + 1))
+            if git diff --quiet -- "$f"; then
+              same=$((same + 1))
+            else
+              echo "not byte-identical to the uploaded copy: $f"
+            fi
+          done
+          {
+            echo "### Report rebuilt from the raw data"
+            echo ""
+            echo "- check_results.R: all checks passed"
+            echo "- $same of $total rebuilt tables are byte-for-byte identical to the copies in the repository"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the rebuilt tables and figures as a download
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebuilt-tables-and-figures
+          path: |
+            Supplementary/derived_tables
+            Figures
+            !Figures/artwork
+
+      - name: Put the website together
+        run: |
+          mkdir _site
+          cp Reproducible-report.html _site/Reproducible-report.html
+          printf '%s\n' '<!doctype html>' '<meta charset="utf-8">' '<title>Reproducible report</title>' '<meta http-equiv="refresh" content="0; url=Reproducible-report.html">' '<a href="Reproducible-report.html">Reproducible report</a>' > _site/index.html
+
+      - name: Upload the website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  publish:
+    needs: render
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
