@@ -62,10 +62,21 @@ jobs:
             any::knitr
             any::rmarkdown
 
-      - name: Install Quarto
+      # GitHub's machines already come with Quarto. Use that copy; install one
+      # only if it is ever missing.
+      - name: Look for Quarto
+        id: quarto
+        run: |
+          if command -v quarto > /dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Quarto $(quarto --version) is already installed"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Quarto (only if it is missing)
+        if: steps.quarto.outputs.found != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: "1.6.42"
 
       # Start from the inputs alone: remove every table, figure and the report
       # that were uploaded, so that everything below is made by this run.
